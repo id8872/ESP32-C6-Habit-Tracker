@@ -14,21 +14,22 @@ struct Habit {
     const char* sheetAction;  
     const char* sheetValue;   
     uint8_t tileIndex;        
-    lv_align_t alignment;     
+    lv_align_t alignment;
 };
 
 Habit habits[] = {
     // Tile 0 (Page 1)
-    {"PUL", "Pull Ups",  "5",    0, LV_ALIGN_LEFT_MID},  // Will show PUL \n x5
-    {"PSH", "Push Ups",  "10",   0, LV_ALIGN_RIGHT_MID}, // Will show PSH \n x10
+    {"PUL", "Pull Ups",  "5",    0, LV_ALIGN_LEFT_MID}, 
+    {"PSH", "Push Ups",  "10",   0, LV_ALIGN_RIGHT_MID},
     
     // Tile 1 (Page 2)
-    {"H2O", "Water",     "40",    1, LV_ALIGN_LEFT_MID},  // Will show H2O \n x1
-    {"MED", "Meditation","12m",  1, LV_ALIGN_RIGHT_MID}, // Will show MED \n x10m
-    
+    {"H2O", "Water",     "40",   1, LV_ALIGN_LEFT_MID}, 
+    {"MED", "Meditation","12m",  1, LV_ALIGN_RIGHT_MID},
+  
     // Tile 2 (Page 3)
-    {"SWM", "Swim",      "100m", 2, LV_ALIGN_CENTER}     // Will show SWM \n x425m
+    {"SWM", "Swim",      "100m", 2, LV_ALIGN_CENTER}    
 };
+
 const int NUM_HABITS = sizeof(habits) / sizeof(habits[0]);
 
 // =========================================================
@@ -46,13 +47,13 @@ const int NUM_HABITS = sizeof(habits) / sizeof(habits[0]);
 #define COLOR_BLUE   0x007BFF 
 #define COLOR_YELLOW 0xFFC107 
 #define COLOR_GREEN  0x28A745 
-#define COLOR_RED    0xDC3545 
+#define COLOR_RED    0xDC3545
+#define COLOR_BLACK  0x000000
 
 // =========================================================
 // 3. HARDWARE DRIVERS
 // =========================================================
 Arduino_DataBus *bus = new Arduino_HWSPI(15 /* DC */, 14 /* CS */, 1 /* SCK */, 2 /* MOSI */);
-
 Arduino_GFX *gfx = new Arduino_ST7789(
   bus, 22 /* RST */, 1 /* rotation - Landscape */, false /* IPS */,
   172 /* width */, 320 /* height */,
@@ -95,6 +96,10 @@ String pending_action = "";
 String pending_value = "";
 lv_obj_t * pending_btn = NULL;
 
+// Variables for the non-blocking UI timer
+unsigned long color_reset_time = 0;
+bool resetting_color = false;
+
 // =========================================================
 // 4. NETWORKING & GOOGLE SHEETS
 // =========================================================
@@ -103,7 +108,7 @@ void setup_wifi() {
     WiFi.begin(ssid, password);
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 10) { 
-        delay(500); 
+        delay(500);
         Serial.print(".");
         attempts++;
     }
@@ -117,21 +122,20 @@ void setup_wifi() {
 bool send_to_google_sheets(String action, String value) {
     if (WiFi.status() == WL_CONNECTED) {
         HTTPClient http;
-        
-        // Google requires strict redirects for Apps Script
         http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
         http.begin(GOOGLE_SCRIPT_URL);
         http.addHeader("Content-Type", "application/json");
-        String jsonPayload = "{\"Action\":\"" + action + "\",\"Value\":\"" + value + "\"}";
+        
+        // Use a fixed buffer for memory stability to prevent heap fragmentation
+        char jsonPayload[128];
+        snprintf(jsonPayload, sizeof(jsonPayload), "{\"Action\":\"%s\",\"Value\":\"%s\"}", action.c_str(), value.c_str());
         
         int httpCode = http.POST(jsonPayload);
         http.end();
-        
         Serial.printf("Google Sheets HTTP Code: %d\n", httpCode);
         
-        // Anything above 0 means the server accepted it
         if(httpCode > 0) {
-            return true; 
+            return true;
         }
     }
     return false;
@@ -144,14 +148,13 @@ void my_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *c
     uint32_t w = (area->x2 - area->x1 + 1);
     uint32_t h = (area->y2 - area->y1 + 1);
 
-    // FIX FOR ESP32 ENDIANNESS (This fixes the Yellow/Green color bug!)
-    // Swaps the high and low bytes of the 16-bit color array so the SPI sends it correctly.
     for(uint32_t i = 0; i < w * h; i++) {
         uint16_t c = color_p[i].full;
         color_p[i].full = (c >> 8) | (c << 8); 
     }
 
     gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)&color_p->full, w, h);
+    
     lv_disp_flush_ready(disp_drv);
 }
 
@@ -167,11 +170,9 @@ void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
         Wire.requestFrom((uint16_t)AXS_ADDR, (uint8_t)14, (uint8_t)true);
         if (Wire.available() >= 14) {
             Wire.readBytes(buffer, 14);
-            
             uint8_t touch_num = buffer[1];
             if (touch_num > 0) {
-                data->state = LV_INDEV_STATE_PR; 
-                
+                data->state = LV_INDEV_STATE_PR;
                 uint16_t raw_x = ((uint16_t)(buffer[2] & 0x0F) << 8) | buffer[3];
                 uint16_t raw_y = ((uint16_t)(buffer[4] & 0x0F) << 8) | buffer[5];
                 
@@ -181,7 +182,7 @@ void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
                 
                 data->point.x = last_x;
                 data->point.y = last_y;
-                return; 
+                return;
             }
         }
     }
@@ -197,7 +198,6 @@ void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
 static void btn_event_cb(lv_event_t * e) {
     if(lv_event_get_code(e) == LV_EVENT_CLICKED) {
         lv_obj_t * btn = lv_event_get_target(e);
-        
         Habit *h = (Habit *)lv_event_get_user_data(e);
         
         pending_action = h->sheetAction;
@@ -209,63 +209,29 @@ static void btn_event_cb(lv_event_t * e) {
     }
 }
 
-// FLAT BUTTON LAYOUT
-//
-// void create_counter_button(lv_obj_t * parent, Habit *habit) {
-//     lv_obj_t * btn = lv_btn_create(parent);
-//     lv_obj_set_size(btn, 150, 150); 
-//     lv_obj_align(btn, habit->alignment, 0, 0); 
-//     
-//     // Style the button
-//     lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_BLUE), LV_PART_MAIN);
-//     lv_obj_set_style_radius(btn, 20, LV_PART_MAIN); 
-// 
-//     // Attach the habit struct to the button click event!
-//     lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_ALL, habit);
-// 
-//     // Style the text 
-//     lv_obj_t * label = lv_label_create(btn);
-//     
-//     // --> NEW: Format the text to pull the label, add a newline (\n), and add the value!
-//     lv_label_set_text_fmt(label, "%s\nx%s", habit->shortLabel, habit->sheetValue);
-//     
-//     // --> NEW: Tell LVGL to center the lines of text relative to each other
-//     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-// 
-//     lv_obj_set_style_text_font(label, &lv_font_montserrat_36, LV_PART_MAIN); 
-//     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN); 
-//     lv_obj_center(label);
-}
-
 lv_obj_t * create_counter_button(lv_obj_t * parent, Habit *habit) {
     lv_obj_t * btn = lv_btn_create(parent);
     lv_obj_set_size(btn, 150, 150); 
     lv_obj_align(btn, habit->alignment, 0, 0); 
     
     // --- 1. DEFAULT 3D STYLE (Unpressed) ---
-    // A linear gradient from light blue at the top to dark blue at the bottom
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x3399FF), LV_PART_MAIN); // Lighter top
-    lv_obj_set_style_bg_grad_color(btn, lv_color_hex(0x0056B3), LV_PART_MAIN); // Darker bottom
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x3399FF), LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_color(btn, lv_color_hex(0x0056B3), LV_PART_MAIN); 
     lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    
-    // Add a 3D drop shadow below the button
     lv_obj_set_style_shadow_width(btn, 15, LV_PART_MAIN);
     lv_obj_set_style_shadow_color(btn, lv_color_hex(0x222222), LV_PART_MAIN);
-    lv_obj_set_style_shadow_ofs_y(btn, 8, LV_PART_MAIN); // Push shadow down
+    lv_obj_set_style_shadow_ofs_y(btn, 8, LV_PART_MAIN); 
     lv_obj_set_style_shadow_ofs_x(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 20, LV_PART_MAIN);
     
-    lv_obj_set_style_radius(btn, 20, LV_PART_MAIN); 
-
     // --- 2. PRESSED 3D STYLE (When touched) ---
-    // When pressed, we remove the shadow and physically move the button down 8 pixels
-    // to make it look like it was pushed into the board.
     lv_obj_set_style_shadow_ofs_y(btn, 0, LV_PART_MAIN | LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_PRESSED);
     lv_obj_set_style_translate_y(btn, 8, LV_PART_MAIN | LV_STATE_PRESSED);
-
+    
     // Attach the habit struct to the button click event
     lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_ALL, habit);
-
+    
     // --- 3. TEXT STYLE ---
     lv_obj_t * label = lv_label_create(btn);
     lv_label_set_text_fmt(label, "%s\nx%s", habit->shortLabel, habit->sheetValue);
@@ -278,12 +244,10 @@ lv_obj_t * create_counter_button(lv_obj_t * parent, Habit *habit) {
 }
 
 void build_counter_ui() {
-    lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(COLOR_BLACK), LV_PART_MAIN);
 
     lv_obj_t * tv = lv_tileview_create(lv_scr_act());
-    lv_obj_set_style_bg_color(tv, lv_color_hex(0x000000), LV_PART_MAIN);
-    
-    // Remove scrollbars so it looks cleaner
+    lv_obj_set_style_bg_color(tv, lv_color_hex(COLOR_BLACK), LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(tv, LV_SCROLLBAR_MODE_OFF);
 
     int max_tile = 0;
@@ -311,7 +275,7 @@ void setup() {
     
     if (!gfx->begin()) Serial.println("gfx->begin() failed!");
     lcd_reg_init();
-    gfx->setRotation(1); 
+    gfx->setRotation(1);
     gfx->fillScreen(RGB565_BLACK);
 
     pinMode(GFX_BL, OUTPUT);
@@ -346,7 +310,7 @@ void setup() {
     lv_indev_drv_register(&indev_drv);
 
     build_counter_ui();
-    setup_wifi(); 
+    setup_wifi();
 }
 
 void loop() {
@@ -355,7 +319,6 @@ void loop() {
 
     if (pending_action != "") {
         bool success = send_to_google_sheets(pending_action, pending_value);
-        
         if (success) {
             lv_obj_set_style_bg_color(pending_btn, lv_color_hex(COLOR_GREEN), LV_PART_MAIN);
         } else {
@@ -363,12 +326,22 @@ void loop() {
         }
         
         lv_refr_now(NULL); 
-        delay(1000);       
         
-        lv_obj_set_style_bg_color(pending_btn, lv_color_hex(COLOR_BLUE), LV_PART_MAIN);
-        
+        // Clear pending actions but save the button state to reset later
         pending_action = "";
         pending_value = "";
-        pending_btn = NULL;
+        
+        // Start the non-blocking timer
+        resetting_color = true;
+        color_reset_time = millis();
+    }
+
+    // Check if 1 second has passed without pausing the microcontroller
+    if (resetting_color && (millis() - color_reset_time >= 1000)) {
+        if (pending_btn != NULL) {
+            lv_obj_set_style_bg_color(pending_btn, lv_color_hex(COLOR_BLUE), LV_PART_MAIN);
+            pending_btn = NULL;
+        }
+        resetting_color = false;
     }
 }
