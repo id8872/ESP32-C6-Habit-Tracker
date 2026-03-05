@@ -19,7 +19,7 @@ struct Habit {
 
 Habit habits[] = {
     // Tile 0 (Page 1)
-    {"PUL", "Pull Ups",  "10",    0, LV_ALIGN_LEFT_MID},  // Will show PUL \n x5
+    {"PUL", "Pull Ups",  "5",    0, LV_ALIGN_LEFT_MID},  // Will show PUL \n x5
     {"PSH", "Push Ups",  "10",   0, LV_ALIGN_RIGHT_MID}, // Will show PSH \n x10
     
     // Tile 1 (Page 2)
@@ -27,7 +27,7 @@ Habit habits[] = {
     {"MED", "Meditation","12m",  1, LV_ALIGN_RIGHT_MID}, // Will show MED \n x10m
     
     // Tile 2 (Page 3)
-    {"SWM", "Swim",      "250m", 2, LV_ALIGN_CENTER}     // Will show SWM \n x425m
+    {"SWM", "Swim",      "100m", 2, LV_ALIGN_CENTER}     // Will show SWM \n x425m
 };
 const int NUM_HABITS = sizeof(habits) / sizeof(habits[0]);
 
@@ -209,30 +209,72 @@ static void btn_event_cb(lv_event_t * e) {
     }
 }
 
-void create_counter_button(lv_obj_t * parent, Habit *habit) {
+// FLAT BUTTON LAYOUT
+//
+// void create_counter_button(lv_obj_t * parent, Habit *habit) {
+//     lv_obj_t * btn = lv_btn_create(parent);
+//     lv_obj_set_size(btn, 150, 150); 
+//     lv_obj_align(btn, habit->alignment, 0, 0); 
+//     
+//     // Style the button
+//     lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_BLUE), LV_PART_MAIN);
+//     lv_obj_set_style_radius(btn, 20, LV_PART_MAIN); 
+// 
+//     // Attach the habit struct to the button click event!
+//     lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_ALL, habit);
+// 
+//     // Style the text 
+//     lv_obj_t * label = lv_label_create(btn);
+//     
+//     // --> NEW: Format the text to pull the label, add a newline (\n), and add the value!
+//     lv_label_set_text_fmt(label, "%s\nx%s", habit->shortLabel, habit->sheetValue);
+//     
+//     // --> NEW: Tell LVGL to center the lines of text relative to each other
+//     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+// 
+//     lv_obj_set_style_text_font(label, &lv_font_montserrat_36, LV_PART_MAIN); 
+//     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN); 
+//     lv_obj_center(label);
+}
+
+lv_obj_t * create_counter_button(lv_obj_t * parent, Habit *habit) {
     lv_obj_t * btn = lv_btn_create(parent);
     lv_obj_set_size(btn, 150, 150); 
     lv_obj_align(btn, habit->alignment, 0, 0); 
     
-    // Style the button
-    lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_BLUE), LV_PART_MAIN);
+    // --- 1. DEFAULT 3D STYLE (Unpressed) ---
+    // A linear gradient from light blue at the top to dark blue at the bottom
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x3399FF), LV_PART_MAIN); // Lighter top
+    lv_obj_set_style_bg_grad_color(btn, lv_color_hex(0x0056B3), LV_PART_MAIN); // Darker bottom
+    lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, LV_PART_MAIN);
+    
+    // Add a 3D drop shadow below the button
+    lv_obj_set_style_shadow_width(btn, 15, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(btn, lv_color_hex(0x222222), LV_PART_MAIN);
+    lv_obj_set_style_shadow_ofs_y(btn, 8, LV_PART_MAIN); // Push shadow down
+    lv_obj_set_style_shadow_ofs_x(btn, 0, LV_PART_MAIN);
+    
     lv_obj_set_style_radius(btn, 20, LV_PART_MAIN); 
 
-    // Attach the habit struct to the button click event!
+    // --- 2. PRESSED 3D STYLE (When touched) ---
+    // When pressed, we remove the shadow and physically move the button down 8 pixels
+    // to make it look like it was pushed into the board.
+    lv_obj_set_style_shadow_ofs_y(btn, 0, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_translate_y(btn, 8, LV_PART_MAIN | LV_STATE_PRESSED);
+
+    // Attach the habit struct to the button click event
     lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_ALL, habit);
 
-    // Style the text 
+    // --- 3. TEXT STYLE ---
     lv_obj_t * label = lv_label_create(btn);
-    
-    // --> NEW: Format the text to pull the label, add a newline (\n), and add the value!
     lv_label_set_text_fmt(label, "%s\nx%s", habit->shortLabel, habit->sheetValue);
-    
-    // --> NEW: Tell LVGL to center the lines of text relative to each other
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
     lv_obj_set_style_text_font(label, &lv_font_montserrat_36, LV_PART_MAIN); 
     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN); 
     lv_obj_center(label);
+
+    return btn;
 }
 
 void build_counter_ui() {
