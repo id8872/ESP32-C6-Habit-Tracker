@@ -27,7 +27,11 @@ Habit habits[] = {
     {"MED", "Meditation","12m",  1, LV_ALIGN_RIGHT_MID},
   
     // Tile 2 (Page 3)
-    {"SWM", "Swim",      "100m", 2, LV_ALIGN_CENTER}    
+    {"SWM", "Swim",      "100m", 2, LV_ALIGN_CENTER},
+
+    // Tile 3 (Page 4)
+    {"RPL", "Reverse Plank", "30s", 3, LV_ALIGN_LEFT_MID},
+    {"BNC", "Bounce",        "3m",  3, LV_ALIGN_RIGHT_MID}
 };
 
 const int NUM_HABITS = sizeof(habits) / sizeof(habits[0]);
@@ -214,19 +218,18 @@ lv_obj_t * create_counter_button(lv_obj_t * parent, Habit *habit) {
     lv_obj_set_size(btn, 150, 150); 
     lv_obj_align(btn, habit->alignment, 0, 0); 
     
-    // --- 1. DEFAULT 3D STYLE (Unpressed) ---
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x3399FF), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_color(btn, lv_color_hex(0x0056B3), LV_PART_MAIN); 
-    lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(btn, 15, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(btn, lv_color_hex(0x222222), LV_PART_MAIN);
-    lv_obj_set_style_shadow_ofs_y(btn, 8, LV_PART_MAIN); 
-    lv_obj_set_style_shadow_ofs_x(btn, 0, LV_PART_MAIN);
+    // --- 1. FLAT STYLE (Unpressed) ---
+    // Gradient + shadow rendering (added in the Mar 5 GitHub updates, after
+    // the original smooth-running build) is very expensive in LVGL during
+    // tileview swipe animations, especially with a 20-line draw buffer:
+    // every swipe frame re-renders both visible buttons' gradients/shadows
+    // strip by strip. Flat fill matches the original build's look and speed.
+    // (It also matches the colour-reset path, which resets buttons to solid
+    // COLOR_BLUE after a tap anyway.)
+    lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_BLUE), LV_PART_MAIN);
     lv_obj_set_style_radius(btn, 20, LV_PART_MAIN);
-    
-    // --- 2. PRESSED 3D STYLE (When touched) ---
-    lv_obj_set_style_shadow_ofs_y(btn, 0, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_PRESSED);
+
+    // --- 2. PRESSED STYLE (When touched) ---
     lv_obj_set_style_translate_y(btn, 8, LV_PART_MAIN | LV_STATE_PRESSED);
     
     // Attach the habit struct to the button click event
